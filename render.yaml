@@ -1,0 +1,56 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+# One web service (built from the root Dockerfile) and one managed Postgres database.
+# Plan names below are current as of when this was written -- check Render's dashboard
+# for current tier names/pricing before applying.
+
+databases:
+  - name: hellocare-email-db
+    plan: basic-256mb
+    databaseName: hellocare_email
+    user: hellocare_email
+
+services:
+  - name: hellocare-email-client
+    type: web
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: hellocare-email-db
+          property: connectionString
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_ACCESS_EXPIRES_IN
+        value: 15m
+      - key: JWT_REFRESH_EXPIRES_IN
+        value: 7d
+      - key: BCRYPT_SALT_ROUNDS
+        value: "12"
+      # Same origin in production (this service serves its own built frontend -- see
+      # backend/src/app.ts), so this is defense-in-depth rather than something
+      # production traffic depends on. Update if this ever gets its own subdomain.
+      - key: CORS_ORIGIN
+        value: https://hellocare-email-client.onrender.com
+      # Ask InMotion/cPanel for the exact mail server hostname and port for
+      # hellocareconsulting.com (cPanel > Email Accounts > Connect Devices).
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_SECURE
+        sync: false
+      # Each mailbox's own real password -- set individually in the Render dashboard,
+      # never committed to git. Sending silently fails per-recipient (logged, not
+      # crashing) until these are set for real.
+      - key: SMTP_PASS_INFO
+        sync: false
+      - key: SMTP_PASS_KEN
+        sync: false
+      - key: SMTP_PASS_ISABELLA
+        sync: false
