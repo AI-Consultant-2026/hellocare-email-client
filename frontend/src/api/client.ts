@@ -47,7 +47,13 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}, is
     body: options.body ? (options.isFormData ? (options.body as FormData) : JSON.stringify(options.body)) : undefined,
   });
 
-  if (res.status === 401 && !isRetry) {
+  // The refresh-and-retry dance only makes sense for a 401 on some OTHER protected
+  // route, where it means "the access token expired." A 401 from /auth/login or
+  // /auth/refresh themselves means something else entirely (wrong password; no/expired
+  // refresh cookie) -- retrying via refresh would just fail again and, worse, paper
+  // over the real "Invalid email or password" with a misleading "session expired".
+  const isAuthEndpoint = path === "/auth/login" || path === "/auth/refresh";
+  if (res.status === 401 && !isRetry && !isAuthEndpoint) {
     const refreshed = await tryRefresh();
     if (refreshed) return apiFetch<T>(path, options, true);
     onUnauthorized?.();
