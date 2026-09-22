@@ -14,10 +14,15 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
     return res.status(err.statusCode).json({ error: err.message });
   }
   if (err instanceof multer.MulterError) {
-    const message = err.code === "LIMIT_FILE_SIZE" ? "That file is too large (5MB limit)." : "Only .csv files are accepted.";
-    return res.status(400).json({ error: message });
+    if (err.code === "LIMIT_FILE_SIZE") {
+      const isAttachment = req.path.includes("/attachments");
+      return res.status(400).json({ error: isAttachment ? "That file is too large (10MB limit)." : "That file is too large (5MB limit)." });
+    }
+    return res.status(400).json({ error: "That file could not be uploaded." });
   }
-  if (err instanceof Error && err.message === "Only .csv files are accepted.") {
+  // fileFilter callbacks in middleware/upload.ts pass a plain Error with a specific,
+  // already-user-safe message (not a stack trace or internal detail) -- surfaced as-is.
+  if (err instanceof Error && (err.message === "Only .csv files are accepted." || err.message === "That file type isn't allowed as an email attachment.")) {
     return res.status(400).json({ error: err.message });
   }
   logger.error("Unhandled error", err);

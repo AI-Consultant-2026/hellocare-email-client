@@ -41,6 +41,14 @@ export interface Campaign {
   createdAt: string;
   creator?: { name: string; email: string };
   recipients?: CampaignRecipient[];
+  attachments?: CampaignAttachment[];
+}
+
+export interface CampaignAttachment {
+  id: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
 }
 
 export interface CampaignRecipient {

@@ -1,8 +1,14 @@
-import { useEffect, useState } from "react";
+import { ChangeEvent, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { apiFetch, ApiRequestError } from "../api/client";
+import { apiFetch, ApiRequestError, downloadFile } from "../api/client";
 import { Button, Card, StatusBadge } from "../components/ui";
-import { Campaign, CampaignRecipient, SenderAccount } from "../types";
+import { Campaign, CampaignAttachment, CampaignRecipient, SenderAccount } from "../types";
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 const VARIABLES = ["{{first_name}}", "{{last_name}}", "{{company}}", "{{email}}"];
 
@@ -22,6 +28,8 @@ export function ComposePage() {
   const [testEmail, setTestEmail] = useState("");
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [showRecipients, setShowRecipients] = useState(false);
+  const [attaching, setAttaching] = useState(false);
+  const attachInputRef = useRef<HTMLInputElement>(null);
 
   async function load() {
     const [campaignData, accountsData] = await Promise.all([
@@ -96,6 +104,39 @@ export function ComposePage() {
   async function removeRecipient(recipient: CampaignRecipient) {
     await apiFetch(`/campaigns/${id}/recipients/${recipient.id}`, { method: "DELETE" });
     load();
+  }
+
+  async function handleAttachFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (attachInputRef.current) attachInputRef.current.value = "";
+    if (!file) return;
+    setAttaching(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      await apiFetch(`/campaigns/${id}/attachments`, { method: "POST", body: formData, isFormData: true });
+      setNotice(`Attached ${file.name}.`);
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiRequestError ? err.message : "Could not attach that file.");
+    } finally {
+      setAttaching(false);
+    }
+  }
+
+  async function handleRemoveAttachment(attachment: CampaignAttachment) {
+    await apiFetch(`/campaigns/${id}/attachments/${attachment.id}`, { method: "DELETE" });
+    load();
+  }
+
+  async function handleDownloadAttachment(attachment: CampaignAttachment) {
+    try {
+      await downloadFile(`/campaigns/${id}/attachments/${attachment.id}/download`, attachment.filename);
+    } catch (err) {
+      setError(err instanceof ApiRequestError ? err.message : "Could not download that file.");
+    }
   }
 
   if (!campaign) return <p className="text-navy/50">Loading…</p>;
@@ -186,6 +227,40 @@ export function ComposePage() {
             Preview with a real recipient
           </Button>
         </div>
+      </Card>
+
+      <Card>
+        <div className="flex items-center justify-between">
+          <h2 className="font-medium text-navy">Attachments</h2>
+          <div>
+            <input ref={attachInputRef} type="file" onChange={handleAttachFile} className="hidden" />
+            <Button variant="secondary" onClick={() => attachInputRef.current?.click()} disabled={attaching}>
+              {attaching ? "Attaching…" : "Attach a file"}
+            </Button>
+          </div>
+        </div>
+        <p className="mt-1 text-xs text-navy/50">
+          Sent with every copy of this email. 10MB per file, 20MB total. Executable file types aren't accepted.
+        </p>
+        {campaign.attachments && campaign.attachments.length > 0 && (
+          <ul className="mt-4 space-y-2">
+            {campaign.attachments.map((a) => (
+              <li key={a.id} className="flex items-center justify-between rounded border border-navy/10 px-3 py-2 text-sm">
+                <span>
+                  {a.filename} <span className="text-navy/40">({formatBytes(a.sizeBytes)})</span>
+                </span>
+                <span className="flex gap-3">
+                  <button className="text-gold hover:underline" onClick={() => handleDownloadAttachment(a)}>
+                    Download
+                  </button>
+                  <button className="text-red-600 hover:underline" onClick={() => handleRemoveAttachment(a)}>
+                    Remove
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </Card>
 
       {previewHtml && (

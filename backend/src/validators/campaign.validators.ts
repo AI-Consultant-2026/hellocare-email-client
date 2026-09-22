@@ -32,3 +32,7 @@ export const sendTestEmailSchema = z.object({
   params: z.object({ id: z.string().uuid() }),
   body: z.object({ testEmail: z.string().email() }),
 });
+
+export const attachmentIdSchema = z.object({
+  params: z.object({ id: z.string().uuid(), attachmentId: z.string().uuid() }),
+});

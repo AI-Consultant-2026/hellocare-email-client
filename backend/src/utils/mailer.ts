@@ -1,11 +1,13 @@
 import nodemailer, { Transporter } from "nodemailer";
 import { config, getSenderPassword, SENDER_ACCOUNTS, SenderAccountKey } from "../config";
+import { NodemailerAttachment } from "./attachments";
 
 export interface OutgoingMessage {
   to: string;
   subject: string;
   text: string;
   html: string;
+  attachments?: NodemailerAttachment[];
 }
 
 // One transporter per sender account, built lazily and cached -- each authenticates as
@@ -47,5 +49,6 @@ export async function sendAs(accountKey: SenderAccountKey, message: OutgoingMess
     subject: message.subject,
     text: message.text,
     html: message.html,
+    attachments: message.attachments,
   });
 }

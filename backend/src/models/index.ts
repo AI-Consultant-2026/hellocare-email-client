@@ -1,6 +1,7 @@
 import { Sequelize } from "sequelize";
 import { AuditLog, initAuditLogModel } from "./auditLog.model";
 import { Campaign, initCampaignModel } from "./campaign.model";
+import { CampaignAttachment, initCampaignAttachmentModel } from "./campaignAttachment.model";
 import { CampaignRecipient, initCampaignRecipientModel } from "./campaignRecipient.model";
 import { initRefreshTokenModel, RefreshToken } from "./refreshToken.model";
 import { initUserModel, User } from "./user.model";
@@ -24,6 +25,7 @@ initUserModel(sequelize);
 initRefreshTokenModel(sequelize);
 initCampaignModel(sequelize);
 initCampaignRecipientModel(sequelize);
+initCampaignAttachmentModel(sequelize);
 initAuditLogModel(sequelize);
 
 User.hasMany(RefreshToken, { foreignKey: "userId" });
@@ -35,7 +37,10 @@ Campaign.belongsTo(User, { foreignKey: "createdBy", as: "creator" });
 Campaign.hasMany(CampaignRecipient, { foreignKey: "campaignId", as: "recipients", onDelete: "CASCADE" });
 CampaignRecipient.belongsTo(Campaign, { foreignKey: "campaignId" });
 
+Campaign.hasMany(CampaignAttachment, { foreignKey: "campaignId", as: "attachments", onDelete: "CASCADE" });
+CampaignAttachment.belongsTo(Campaign, { foreignKey: "campaignId" });
+
 User.hasMany(AuditLog, { foreignKey: "userId" });
 AuditLog.belongsTo(User, { foreignKey: "userId" });
 
-export { AuditLog, Campaign, CampaignRecipient, RefreshToken, User };
+export { AuditLog, Campaign, CampaignAttachment, CampaignRecipient, RefreshToken, User };

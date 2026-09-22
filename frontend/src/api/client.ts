@@ -68,3 +68,34 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}, is
   }
   return data as T;
 }
+
+// Same auth/refresh handling as apiFetch, but for a binary response (an attachment
+// download) rather than JSON -- a plain <a href> can't carry the Authorization header,
+// so downloads go through this and get saved via a temporary object URL instead.
+export async function downloadFile(path: string, suggestedFilename: string, isRetry = false): Promise<void> {
+  const headers: Record<string, string> = {};
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+
+  const res = await fetch(`/api${path}`, { headers, credentials: "include" });
+
+  if (res.status === 401 && !isRetry) {
+    const refreshed = await tryRefresh();
+    if (refreshed) return downloadFile(path, suggestedFilename, true);
+    onUnauthorized?.();
+    throw new ApiRequestError(401, "Your session has expired. Please log in again.");
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiRequestError(res.status, data.error || "Could not download this file.");
+  }
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = suggestedFilename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}

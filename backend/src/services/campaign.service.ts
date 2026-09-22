@@ -1,10 +1,11 @@
 import { Op } from "sequelize";
 import { SenderAccountKey } from "../config";
-import { Campaign, CampaignRecipient, User } from "../models";
+import { Campaign, CampaignAttachment, CampaignRecipient, User } from "../models";
 import { ApiError } from "../utils/ApiError";
 import { isValidEmail, parseClientListCsv } from "../utils/csvParser";
 import { mergeHtml, mergePlainText, PersonalizationFields } from "../utils/personalize";
 import { sendAs } from "../utils/mailer";
+import { MAX_TOTAL_ATTACHMENT_BYTES, toNodemailerAttachments } from "../utils/attachments";
 import { RecipientStatus } from "../models/campaignRecipient.model";
 import { logger } from "../utils/logger";
 import { recordAudit } from "./auditLog.service";
@@ -117,12 +118,33 @@ export async function getCampaign(id: string) {
   const campaign = await Campaign.findByPk(id, {
     include: [
       { model: CampaignRecipient, as: "recipients" },
+      // The raw file bytes are excluded here -- this is metadata for the Compose page's
+      // attachment list, never a place a multi-MB blob should ride along with every
+      // ordinary campaign fetch. See getAttachmentForDownload for the one place the
+      // actual bytes are read back out.
+      { model: CampaignAttachment, as: "attachments", attributes: { exclude: ["data"] } },
       { model: User, as: "creator", attributes: ["name", "email"] },
     ],
   });
   if (!campaign) throw ApiError.notFound("Campaign not found.");
   campaign.recipients?.sort((a, b) => a.rowNumber - b.rowNumber);
   return campaign;
+}
+
+export async function deleteCampaign(id: string, userId: string, ipAddress: string | null): Promise<void> {
+  const campaign = await Campaign.findByPk(id);
+  if (!campaign) throw ApiError.notFound("Campaign not found.");
+  // Deletable regardless of status. The durable record of what was actually sent lives
+  // in audit_logs (campaign_send_confirmed etc., keyed by campaignId in its own details
+  // JSON, not a foreign key) and survives this delete -- this only removes the
+  // draft/working copy (and, via cascade, its recipients and attachments).
+  await recordAudit(
+    "campaign_deleted",
+    userId,
+    { campaignId: id, filename: campaign.originalFilename, status: campaign.status, subject: campaign.subject },
+    ipAddress,
+  );
+  await campaign.destroy();
 }
 
 function assertDraft(campaign: Campaign) {
@@ -181,6 +203,62 @@ export async function removeRecipient(campaignId: string, recipientId: string): 
   campaign.totalRecipients -= 1;
   if (countField) campaign[countField] -= 1;
   await campaign.save();
+}
+
+export async function addAttachment(
+  campaignId: string,
+  file: { buffer: Buffer; originalname: string; mimetype: string },
+): Promise<CampaignAttachment> {
+  const campaign = await Campaign.findByPk(campaignId);
+  if (!campaign) throw ApiError.notFound("Campaign not found.");
+  assertDraft(campaign);
+
+  const existingTotal =
+    ((await CampaignAttachment.sum("sizeBytes", { where: { campaignId } })) as number | null) ?? 0;
+  if (existingTotal + file.buffer.length > MAX_TOTAL_ATTACHMENT_BYTES) {
+    throw ApiError.badRequest(
+      `Adding this file would put the campaign's total attachments over the ${Math.round(MAX_TOTAL_ATTACHMENT_BYTES / (1024 * 1024))}MB limit. Remove another attachment first, or use a smaller file.`,
+    );
+  }
+
+  return CampaignAttachment.create({
+    campaignId,
+    filename: file.originalname,
+    mimeType: file.mimetype || "application/octet-stream",
+    sizeBytes: file.buffer.length,
+    data: file.buffer,
+  });
+}
+
+export async function listAttachments(campaignId: string) {
+  return CampaignAttachment.findAll({
+    where: { campaignId },
+    attributes: { exclude: ["data"] },
+    order: [["createdAt", "ASC"]],
+  });
+}
+
+export async function removeAttachment(campaignId: string, attachmentId: string): Promise<void> {
+  const campaign = await Campaign.findByPk(campaignId);
+  if (!campaign) throw ApiError.notFound("Campaign not found.");
+  assertDraft(campaign);
+  const attachment = await CampaignAttachment.findOne({ where: { id: attachmentId, campaignId } });
+  if (!attachment) throw ApiError.notFound("Attachment not found.");
+  await attachment.destroy();
+}
+
+// The one place the raw bytes are read back out -- for the Compose page's "download to
+// confirm" link, and for actually attaching the file to outgoing mail (see
+// getAttachmentsForSending below).
+export async function getAttachmentForDownload(campaignId: string, attachmentId: string): Promise<CampaignAttachment> {
+  const attachment = await CampaignAttachment.findOne({ where: { id: attachmentId, campaignId } });
+  if (!attachment) throw ApiError.notFound("Attachment not found.");
+  return attachment;
+}
+
+async function getAttachmentsForSending(campaignId: string) {
+  const attachments = await CampaignAttachment.findAll({ where: { campaignId } });
+  return toNodemailerAttachments(attachments);
 }
 
 function toFields(r: { email: string; firstName: string; lastName: string; company: string; extraFields: Record<string, string> }): PersonalizationFields {
@@ -248,11 +326,18 @@ export async function sendTestEmail(
     : { email: testEmail, firstName: "Example", lastName: "Client", company: "Example Company", extraFields: {} };
 
   const rendered = renderEmailForRecipient(campaign, { ...sample, email: testEmail });
+  const attachments = await getAttachmentsForSending(campaignId);
   // Must fail loudly -- the admin clicked "Send test" specifically to find out whether
   // sending actually works, unlike a real batched send where one bad recipient must not
   // stop the rest of the campaign.
-  await sendAs(campaign.fromAccountKey, { to: testEmail, subject: `[TEST] ${rendered.subject}`, html: rendered.html, text: rendered.text });
-  await recordAudit("test_email_sent", userId, { campaignId, testEmail }, ipAddress);
+  await sendAs(campaign.fromAccountKey, {
+    to: testEmail,
+    subject: `[TEST] ${rendered.subject}`,
+    html: rendered.html,
+    text: rendered.text,
+    attachments,
+  });
+  await recordAudit("test_email_sent", userId, { campaignId, testEmail, attachmentCount: attachments.length }, ipAddress);
 }
 
 export async function confirmSend(campaignId: string, userId: string, ipAddress: string | null): Promise<void> {
@@ -308,6 +393,9 @@ export async function processCampaignSend(campaignId: string): Promise<void> {
     where: { campaignId, status: { [Op.in]: ["queued", "sending"] } },
     order: [["rowNumber", "ASC"]],
   });
+  // Fetched once per campaign send, not once per recipient -- the same attached file(s)
+  // go out with every copy.
+  const attachments = await getAttachmentsForSending(campaignId);
 
   let cursor = 0;
   async function worker() {
@@ -318,7 +406,7 @@ export async function processCampaignSend(campaignId: string): Promise<void> {
       await recipient.save();
       try {
         const rendered = renderEmailForRecipient({ subject, htmlBody, textBody }, recipient);
-        await sendAs(fromAccountKey, { to: rendered.to, subject: rendered.subject, html: rendered.html, text: rendered.text });
+        await sendAs(fromAccountKey, { to: rendered.to, subject: rendered.subject, html: rendered.html, text: rendered.text, attachments });
         recipient.status = "sent";
         recipient.sentAt = new Date();
         recipient.errorMessage = null;
