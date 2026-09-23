@@ -1,8 +1,10 @@
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { apiFetch, ApiRequestError, downloadFile } from "../api/client";
+import { RichTextEditor } from "../components/RichTextEditor";
 import { Button, Card, StatusBadge } from "../components/ui";
 import { Campaign, CampaignAttachment, CampaignRecipient, SenderAccount } from "../types";
+import { htmlToPlainText, looksLikeHtml, plainTextToHtml } from "../utils/emailHtml";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -22,6 +24,9 @@ export function ComposePage() {
   const [subject, setSubject] = useState("");
   const [htmlBody, setHtmlBody] = useState("");
   const [textBody, setTextBody] = useState("");
+  // The plain-text fallback follows the formatted body automatically until someone edits
+  // it by hand; "Regenerate from email body" re-links it.
+  const [textEdited, setTextEdited] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -40,14 +45,23 @@ export function ComposePage() {
     setAccounts(accountsData.accounts);
     setFromAccountKey(campaignData.campaign.fromAccountKey ?? "");
     setSubject(campaignData.campaign.subject ?? "");
-    setHtmlBody(campaignData.campaign.htmlBody ?? "");
-    setTextBody(campaignData.campaign.textBody ?? "");
+    const html = campaignData.campaign.htmlBody ?? "";
+    const text = campaignData.campaign.textBody ?? "";
+    setHtmlBody(html);
+    setTextBody(text);
+    const htmlForText = html && !looksLikeHtml(html) ? plainTextToHtml(html) : html;
+    setTextEdited(!!text && text.trim() !== htmlToPlainText(htmlForText).trim());
   }
 
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  function handleHtmlChange(html: string) {
+    setHtmlBody(html);
+    if (!textEdited) setTextBody(htmlToPlainText(html));
+  }
 
   async function handleSave() {
     setSaving(true);
@@ -189,21 +203,42 @@ export function ComposePage() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-navy">HTML body</label>
-          <textarea
+          <label className="block text-sm font-medium text-navy">Email body</label>
+          <p className="text-xs text-navy/50">
+            Paste or type your message. A blank line starts a new paragraph; formatting from Word or Google Docs
+            (bold, italics, lists, links) is kept.
+          </p>
+          <RichTextEditor
             value={htmlBody}
-            onChange={(e) => setHtmlBody(e.target.value)}
-            rows={10}
-            placeholder="<p>Dear {{first_name}},</p>"
-            className="mt-1 w-full rounded border border-navy/20 px-3 py-2 text-sm font-mono"
+            onChange={handleHtmlChange}
+            placeholder="Dear {{first_name}}, …"
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-navy">Plain-text fallback</label>
+          <div className="flex items-center justify-between">
+            <label className="block text-sm font-medium text-navy">Plain-text fallback</label>
+            {textEdited ? (
+              <button
+                type="button"
+                className="text-xs text-gold hover:underline"
+                onClick={() => {
+                  setTextEdited(false);
+                  setTextBody(htmlToPlainText(htmlBody));
+                }}
+              >
+                Regenerate from email body
+              </button>
+            ) : (
+              <span className="text-xs text-navy/40">Filled in automatically from the email body</span>
+            )}
+          </div>
           <textarea
             value={textBody}
-            onChange={(e) => setTextBody(e.target.value)}
+            onChange={(e) => {
+              setTextBody(e.target.value);
+              setTextEdited(true);
+            }}
             rows={6}
             placeholder="Dear {{first_name}}, ..."
             className="mt-1 w-full rounded border border-navy/20 px-3 py-2 text-sm"
@@ -266,7 +301,7 @@ export function ComposePage() {
       {previewHtml && (
         <Card>
           <h2 className="mb-3 font-medium text-navy">Preview</h2>
-          <div className="rounded border border-navy/10 bg-white p-4" dangerouslySetInnerHTML={{ __html: previewHtml }} />
+          <div className="email-body rounded border border-navy/10 bg-white p-4" dangerouslySetInnerHTML={{ __html: previewHtml }} />
         </Card>
       )}
 

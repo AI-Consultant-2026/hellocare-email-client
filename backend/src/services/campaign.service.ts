@@ -3,6 +3,7 @@ import { SenderAccountKey } from "../config";
 import { Campaign, CampaignAttachment, CampaignRecipient, User } from "../models";
 import { ApiError } from "../utils/ApiError";
 import { isValidEmail, parseClientListCsv } from "../utils/csvParser";
+import { formatEmailHtml } from "../utils/emailFormat";
 import { mergeHtml, mergePlainText, PersonalizationFields } from "../utils/personalize";
 import { sendAs } from "../utils/mailer";
 import { MAX_TOTAL_ATTACHMENT_BYTES, toNodemailerAttachments } from "../utils/attachments";
@@ -282,7 +283,7 @@ export function renderEmailForRecipient(
   return {
     to: recipient.email,
     subject: mergePlainText(campaign.subject, fields),
-    html: mergeHtml(campaign.htmlBody, fields),
+    html: mergeHtml(formatEmailHtml(campaign.htmlBody), fields),
     text: mergePlainText(campaign.textBody, fields),
   };
 }
