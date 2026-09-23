@@ -1,5 +1,5 @@
 import { ClipboardEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
-import { looksLikeHtml, plainTextToHtml, sanitizeHtml } from "../utils/emailHtml";
+import { fixBlockNesting, looksLikeHtml, plainTextToHtml, sanitizeHtml } from "../utils/emailHtml";
 
 // Formatted email-body editor. Pasting plain text produces real paragraphs (blank line =
 // new paragraph, single line break = <br>); pasting from Word / Google Docs / a web page
@@ -62,7 +62,7 @@ export function RichTextEditor({
   }, [value, sourceMode]);
 
   function emit() {
-    const html = normalise(editorRef.current?.innerHTML ?? "");
+    const html = editorRef.current ? normalise(fixBlockNesting(editorRef.current)) : "";
     lastEmitted.current = html;
     setIsEmpty(!html);
     onChange(html);

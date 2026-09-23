@@ -142,3 +142,47 @@ export function htmlToPlainText(html: string): string {
   block(doc.body.firstChild ?? doc.body);
   return lines.join("\n\n");
 }
+
+const BLOCK_CHILDREN = new Set(["UL", "OL", "P", "H2", "H3", "BLOCKQUOTE", "DIV"]);
+
+// Chrome's list command can leave a list *inside* a paragraph (<p><ul>…</ul>text</p>),
+// which isn't valid HTML and which email clients split apart unpredictably. Lift any
+// block element out of its <p>, wrapping the surrounding inline content in its own <p>s,
+// and wrap stray top-level text in a <p>. Works on a clone of the live editor DOM --
+// re-parsing the HTML string would let the parser mangle the nesting on its own.
+export function fixBlockNesting(source: HTMLElement): string {
+  const root = document.createElement("div");
+  source.childNodes.forEach((n) => root.appendChild(n.cloneNode(true)));
+
+  function regroup(nodes: Node[]): Node[] {
+    const pieces: Node[] = [];
+    let current: HTMLParagraphElement | null = null;
+    nodes.forEach((child) => {
+      if (child.nodeType === Node.ELEMENT_NODE && BLOCK_CHILDREN.has((child as Element).tagName)) {
+        current = null;
+        pieces.push(child);
+      } else {
+        if (!current) {
+          current = document.createElement("p");
+          pieces.push(current);
+        }
+        current.appendChild(child);
+      }
+    });
+    return pieces.filter(
+      (n) => !(n instanceof HTMLParagraphElement && !n.textContent?.trim() && !n.querySelector("br")),
+    );
+  }
+
+  root.querySelectorAll("p").forEach((p) => {
+    if (Array.from(p.children).some((c) => BLOCK_CHILDREN.has(c.tagName))) {
+      p.replaceWith(...regroup(Array.from(p.childNodes)));
+    }
+  });
+  const topLevel = Array.from(root.childNodes);
+  if (topLevel.some((n) => !(n.nodeType === Node.ELEMENT_NODE && BLOCK_CHILDREN.has((n as Element).tagName)))) {
+    const hasContent = topLevel.some((n) => n.textContent?.trim() || (n as Element).querySelector?.("br"));
+    if (hasContent) root.replaceChildren(...regroup(topLevel));
+  }
+  return root.innerHTML;
+}
