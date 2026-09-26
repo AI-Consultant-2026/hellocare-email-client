@@ -357,7 +357,7 @@ export function ComposePage() {
                     )}
                   </td>
                   <td className="py-2">
-                    {r.status !== "invalid" && (
+                    {r.status !== "invalid" && r.status !== "unsubscribed" && (
                       <input type="checkbox" checked={r.isSelected} onChange={() => toggleRecipient(r)} />
                     )}
                   </td>

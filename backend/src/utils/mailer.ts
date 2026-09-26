@@ -8,6 +8,8 @@ export interface OutgoingMessage {
   text: string;
   html: string;
   attachments?: NodemailerAttachment[];
+  // e.g. List-Unsubscribe on campaign emails.
+  headers?: Record<string, string>;
 }
 
 // One transporter per sender account, built lazily and cached -- each authenticates as
@@ -50,5 +52,6 @@ export async function sendAs(accountKey: SenderAccountKey, message: OutgoingMess
     text: message.text,
     html: message.html,
     attachments: message.attachments,
+    headers: message.headers,
   });
 }

@@ -3,7 +3,8 @@ import { DataTypes, Model, Optional, Sequelize } from "sequelize";
 // Validation classification (invalid/duplicate) and send lifecycle (pending..failed)
 // share one column on purpose -- a row is either not sendable (invalid/duplicate) or
 // moves pending -> queued -> sending -> sent/failed. "Skipped" is a valid row the admin
-// explicitly deselected before confirming send.
+// explicitly deselected before confirming send. "Unsubscribed" (2026-09-26) is an address
+// that opted out: found at upload or re-checked just before sending, and never sent to.
 export type RecipientStatus =
   | "pending"
   | "queued"
@@ -12,7 +13,8 @@ export type RecipientStatus =
   | "failed"
   | "skipped"
   | "invalid"
-  | "duplicate";
+  | "duplicate"
+  | "unsubscribed";
 
 export interface CampaignRecipientAttributes {
   id: string;

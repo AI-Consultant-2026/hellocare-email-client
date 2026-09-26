@@ -10,6 +10,8 @@ import { MAX_TOTAL_ATTACHMENT_BYTES, toNodemailerAttachments } from "../utils/at
 import { RecipientStatus } from "../models/campaignRecipient.model";
 import { logger } from "../utils/logger";
 import { recordAudit } from "./auditLog.service";
+import { findUnsubscribed, unsubscribeUrlFor } from "./unsubscribe.service";
+import { addUnsubscribeFooter } from "../utils/unsubscribe";
 
 const SEND_CONCURRENCY = 4;
 
@@ -37,6 +39,7 @@ export async function uploadClientList(
   }
 
   const seenEmails = new Set<string>();
+  const unsubscribed = await findUnsubscribed(rows.map((r) => r.email));
   let validCount = 0;
   let invalidCount = 0;
   let duplicateCount = 0;
@@ -50,6 +53,11 @@ export async function uploadClientList(
     if (errors.length > 0) {
       status = "invalid";
       invalidCount++;
+    } else if (unsubscribed.has(row.email.toLowerCase())) {
+      // Opted out: unsendable, so counted with the invalid rows.
+      status = "unsubscribed";
+      invalidCount++;
+      errors.push("This address has unsubscribed from HelloCare emails.");
     } else {
       const normalized = row.email.toLowerCase();
       if (seenEmails.has(normalized)) {
@@ -179,6 +187,9 @@ export async function setRecipientSelected(campaignId: string, recipientId: stri
   if (isSelected && recipient.status === "invalid") {
     throw ApiError.badRequest("Invalid records cannot be selected for sending.");
   }
+  if (isSelected && recipient.status === "unsubscribed") {
+    throw ApiError.badRequest("This address has unsubscribed and cannot be selected for sending.");
+  }
   recipient.isSelected = isSelected;
   await recipient.save();
   return recipient;
@@ -194,7 +205,7 @@ export async function removeRecipient(campaignId: string, recipientId: string): 
   const countField =
     recipient.status === "pending"
       ? ("validRecipients" as const)
-      : recipient.status === "invalid"
+      : recipient.status === "invalid" || recipient.status === "unsubscribed"
         ? ("invalidRecipients" as const)
         : recipient.status === "duplicate"
           ? ("duplicateRecipients" as const)
@@ -273,6 +284,7 @@ export interface RenderedEmail {
   subject: string;
   html: string;
   text: string;
+  headers: Record<string, string>;
 }
 
 export function renderEmailForRecipient(
@@ -280,11 +292,17 @@ export function renderEmailForRecipient(
   recipient: { email: string; firstName: string; lastName: string; company: string; extraFields: Record<string, string> },
 ): RenderedEmail {
   const fields = toFields(recipient);
+  // Every campaign email ends with an unsubscribe link (2026-09-26); the footer isn't
+  // editable from Compose.
+  const withFooter = addUnsubscribeFooter(
+    mergeHtml(formatEmailHtml(campaign.htmlBody), fields),
+    mergePlainText(campaign.textBody, fields),
+    unsubscribeUrlFor(recipient.email),
+  );
   return {
     to: recipient.email,
     subject: mergePlainText(campaign.subject, fields),
-    html: mergeHtml(formatEmailHtml(campaign.htmlBody), fields),
-    text: mergePlainText(campaign.textBody, fields),
+    ...withFooter,
   };
 }
 
@@ -336,6 +354,7 @@ export async function sendTestEmail(
     subject: `[TEST] ${rendered.subject}`,
     html: rendered.html,
     text: rendered.text,
+    headers: rendered.headers,
     attachments,
   });
   await recordAudit("test_email_sent", userId, { campaignId, testEmail, attachmentCount: attachments.length }, ipAddress);
@@ -398,16 +417,25 @@ export async function processCampaignSend(campaignId: string): Promise<void> {
   // go out with every copy.
   const attachments = await getAttachmentsForSending(campaignId);
 
+  // Re-checked at send time: someone may have unsubscribed after the list was uploaded.
+  const unsubscribed = await findUnsubscribed(recipients.map((r) => r.email));
+
   let cursor = 0;
   async function worker() {
     for (;;) {
       const recipient = recipients[cursor++];
       if (!recipient) return;
+      if (unsubscribed.has(recipient.email.toLowerCase())) {
+        recipient.status = "unsubscribed";
+        recipient.errorMessage = "Not sent: this address has unsubscribed from HelloCare emails.";
+        await recipient.save();
+        continue;
+      }
       recipient.status = "sending";
       await recipient.save();
       try {
         const rendered = renderEmailForRecipient({ subject, htmlBody, textBody }, recipient);
-        await sendAs(fromAccountKey, { to: rendered.to, subject: rendered.subject, html: rendered.html, text: rendered.text, attachments });
+        await sendAs(fromAccountKey, { to: rendered.to, subject: rendered.subject, html: rendered.html, text: rendered.text, headers: rendered.headers, attachments });
         recipient.status = "sent";
         recipient.sentAt = new Date();
         recipient.errorMessage = null;

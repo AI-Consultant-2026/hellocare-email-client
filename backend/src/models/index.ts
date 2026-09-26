@@ -3,6 +3,7 @@ import { AuditLog, initAuditLogModel } from "./auditLog.model";
 import { Campaign, initCampaignModel } from "./campaign.model";
 import { CampaignAttachment, initCampaignAttachmentModel } from "./campaignAttachment.model";
 import { CampaignRecipient, initCampaignRecipientModel } from "./campaignRecipient.model";
+import { EmailUnsubscribe, initEmailUnsubscribeModel } from "./emailUnsubscribe.model";
 import { initRefreshTokenModel, RefreshToken } from "./refreshToken.model";
 import { initUserModel, User } from "./user.model";
 
@@ -27,6 +28,7 @@ initCampaignModel(sequelize);
 initCampaignRecipientModel(sequelize);
 initCampaignAttachmentModel(sequelize);
 initAuditLogModel(sequelize);
+initEmailUnsubscribeModel(sequelize);
 
 User.hasMany(RefreshToken, { foreignKey: "userId" });
 RefreshToken.belongsTo(User, { foreignKey: "userId" });
@@ -43,4 +45,4 @@ CampaignAttachment.belongsTo(Campaign, { foreignKey: "campaignId" });
 User.hasMany(AuditLog, { foreignKey: "userId" });
 AuditLog.belongsTo(User, { foreignKey: "userId" });
 
-export { AuditLog, Campaign, CampaignAttachment, CampaignRecipient, RefreshToken, User };
+export { AuditLog, Campaign, CampaignAttachment, CampaignRecipient, EmailUnsubscribe, RefreshToken, User };

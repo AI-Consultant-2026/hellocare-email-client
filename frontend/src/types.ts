@@ -21,7 +21,8 @@ export type RecipientStatus =
   | "failed"
   | "skipped"
   | "invalid"
-  | "duplicate";
+  | "duplicate"
+  | "unsubscribed";
 
 export interface Campaign {
   id: string;

@@ -11,6 +11,7 @@ import auditLogRoutes from "./routes/auditLog.routes";
 import authRoutes from "./routes/auth.routes";
 import campaignRoutes from "./routes/campaign.routes";
 import senderAccountsRoutes from "./routes/senderAccounts.routes";
+import unsubscribeRoutes from "./routes/unsubscribe.routes";
 
 export function createApp(): Express {
   const app = express();
@@ -30,6 +31,8 @@ export function createApp(): Express {
   app.use("/api/campaigns", campaignRoutes);
   app.use("/api/sender-accounts", senderAccountsRoutes);
   app.use("/api/audit-logs", auditLogRoutes);
+  // Public: the unsubscribe link in every campaign email (no login).
+  app.use("/api/unsubscribe", unsubscribeRoutes);
 
   // Frontend + API served from the same origin in production (see Dockerfile) --
   // anything not matched above falls through to the built React app.

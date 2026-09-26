@@ -41,6 +41,7 @@ const STATUS_STYLES: Record<string, string> = {
   skipped: "bg-gray-100 text-gray-500",
   invalid: "bg-red-100 text-red-700",
   duplicate: "bg-amber-100 text-amber-800",
+  unsubscribed: "bg-gray-200 text-gray-600",
 };
 
 export function StatusBadge({ status }: { status: string }) {
